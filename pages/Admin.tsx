@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Trash2, Upload, Plus, X, Calendar, Lock, Image as ImageIcon, CheckCircle, User, Key, LogIn, Users, Settings, Database, Download, LogOut, Save, BrainCircuit, Server, Activity, AlertCircle, RefreshCw, UserPlus } from 'lucide-react';
+import { Trash2, Upload, Plus, X, Calendar, Lock, Image as ImageIcon, CheckCircle, User, Key, LogIn, Users, Settings, Database, Download, LogOut, Save, BrainCircuit, Server, Activity, AlertCircle, RefreshCw, UserPlus, Copy, Terminal } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { createEvent, deleteEvent, getEvents, addPhotos, loginUser, getUsers, createUser, deleteUser, getGlobalSetting, saveGlobalSetting } from '../services/db';
 import { supabase } from '../services/supabase';
@@ -44,6 +44,7 @@ const Admin: React.FC = () => {
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [usersList, setUsersList] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showSql, setShowSql] = useState(false);
 
   // Form States Eventos
   const [eventName, setEventName] = useState('');
@@ -71,6 +72,44 @@ const Admin: React.FC = () => {
   const [dbTestStatus, setDbTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const SQL_SCRIPT = `-- EXECUTE ESTE SCRIPT NO SQL EDITOR DO SUPABASE
+-- 1. Tabela de Configurações
+CREATE TABLE IF NOT EXISTS public.settings (
+    key text PRIMARY KEY,
+    value text
+);
+
+-- 2. Tabela de Usuários (Fotógrafos)
+CREATE TABLE IF NOT EXISTS public.users (
+    id uuid PRIMARY KEY,
+    username text UNIQUE,
+    password text,
+    name text,
+    "createdAt" bigint
+);
+
+-- 3. Tabela de Eventos
+CREATE TABLE IF NOT EXISTS public.events (
+    id uuid PRIMARY KEY,
+    name text,
+    date date,
+    password text,
+    "coverImage" text,
+    "createdAt" bigint,
+    "createdBy" text
+);
+
+-- 4. Tabela de Fotos
+CREATE TABLE IF NOT EXISTS public.photos (
+    id uuid PRIMARY KEY,
+    "eventId" uuid REFERENCES public.events(id) ON DELETE CASCADE,
+    src text,
+    original text,
+    "createdAt" bigint
+);
+
+-- NOTA: Crie um BUCKET de STORAGE chamado 'images' e deixe como PUBLIC.`;
 
   useEffect(() => {
     const sessionAuth = sessionStorage.getItem('facefind_auth');
@@ -168,7 +207,7 @@ const Admin: React.FC = () => {
   };
 
   const handleDeleteUser = async (id: string) => {
-    if (confirm('Tem certeza que deseja excluir este fotógrafo? Todos os eventos dele permanecerão, mas ele perderá o acesso.')) {
+    if (confirm('Tem certeza que deseja excluir este fotógrafo?')) {
       try {
         await deleteUser(id);
         refreshData();
@@ -234,6 +273,11 @@ const Admin: React.FC = () => {
     finally { setLoading(false); setUploadProgress(''); }
   };
 
+  const copySql = () => {
+    navigator.clipboard.writeText(SQL_SCRIPT);
+    alert("Script SQL copiado! Cole no SQL Editor do Supabase.");
+  };
+
   if (!isAuthenticated) return (
     <Layout>
       <div className="max-w-md mx-auto mt-16 bg-white p-8 rounded-xl shadow-lg border">
@@ -241,7 +285,7 @@ const Admin: React.FC = () => {
         <form onSubmit={handleLogin} className="space-y-4">
           <input className="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Usuário" value={loginUserField} onChange={e => setLoginUserField(e.target.value)} />
           <input className="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none" type="password" placeholder="Senha" value={loginPassField} onChange={e => setLoginPassField(e.target.value)} />
-          {loginError && <p className="text-red-500 text-sm">Credenciais inválidas.</p>}
+          {loginError && <p className="text-red-500 text-sm">Credenciais inválidas. Use admin / 123</p>}
           <Button type="submit" className="w-full" isLoading={loginLoading}>Entrar</Button>
         </form>
       </div>
@@ -282,7 +326,10 @@ const Admin: React.FC = () => {
                         {coverImage ? <img src={coverImage} className="h-32 mx-auto rounded shadow-sm"/> : <div className="text-slate-400 py-4"><ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-20"/><p>Clique para capa</p></div>}
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={async e => e.target.files && setCoverImage(await processImage(e.target.files[0]))} />
                     </div>
-                    <input type="file" multiple accept="image/*" className="w-full text-sm text-slate-500" onChange={e => e.target.files && setEventPhotos(Array.from(e.target.files))} />
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500">Fotos da Galeria</label>
+                        <input type="file" multiple accept="image/*" className="w-full text-sm text-slate-500" onChange={e => e.target.files && setEventPhotos(Array.from(e.target.files))} />
+                    </div>
                     <div className="flex justify-end gap-3 pt-4"><Button variant="secondary" onClick={() => setIsCreatingEvent(false)}>Cancelar</Button><Button type="submit" isLoading={loading}>{uploadProgress || "Publicar Evento"}</Button></div>
                 </form>
             ) : (
@@ -301,6 +348,7 @@ const Admin: React.FC = () => {
                                     </td>
                                 </tr>
                             ))}
+                            {events.length === 0 && !loading && <tr><td colSpan={3} className="p-8 text-center text-slate-400">Nenhum evento cadastrado.</td></tr>}
                         </tbody>
                     </table>
                 </div>
@@ -344,7 +392,7 @@ const Admin: React.FC = () => {
                                 </td>
                             </tr>
                         ))}
-                        {usersList.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-400">Nenhum fotógrafo cadastrado.</td></tr>}
+                        {usersList.length === 0 && !loading && <tr><td colSpan={3} className="p-8 text-center text-slate-400">Nenhum fotógrafo cadastrado.</td></tr>}
                     </tbody>
                 </table>
             </div>
@@ -352,36 +400,90 @@ const Admin: React.FC = () => {
       )}
 
       {activeTab === 'settings' && currentUser?.role === 'master' && (
-        <div className="max-w-xl mx-auto space-y-8">
+        <div className="max-w-2xl mx-auto space-y-8 pb-20">
+            {/* DB Config */}
             <div className="bg-white p-6 border rounded-xl shadow-sm">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><BrainCircuit className="text-indigo-600"/> IA de Reconhecimento</h3>
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><Database className="text-indigo-600"/> Banco de Dados (Supabase)</h3>
                 <div className="space-y-4">
+                    <p className="text-sm text-slate-500 mb-4">Conecte seu próprio projeto Supabase para controle total dos dados.</p>
+                    
+                    <div className="grid grid-cols-1 gap-4">
+                        <div>
+                            <label className="text-xs font-bold text-slate-600 mb-1 block">SUPABASE URL</label>
+                            <input className="w-full border p-2 rounded font-mono text-sm" value={dbUrl} onChange={e => setDbUrl(e.target.value)} placeholder="https://xyz.supabase.co" />
+                        </div>
+                        <div>
+                            <label className="text-xs font-bold text-slate-600 mb-1 block">SUPABASE ANON KEY</label>
+                            <input className="w-full border p-2 rounded font-mono text-sm" type="password" value={dbKey} onChange={e => setDbKey(e.target.value)} placeholder="Sua chave anon public" />
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-4 pt-2">
+                        <button onClick={testDBConnection} className="text-xs font-bold text-indigo-600 flex items-center gap-1 hover:underline">
+                            <RefreshCw className={`w-3 h-3 ${dbTestStatus === 'testing' ? 'animate-spin' : ''}`}/> Testar Conexão
+                        </button>
+                        <button onClick={() => { localStorage.removeItem('facefind_db_config'); window.location.reload(); }} className="text-xs font-bold text-red-600 flex items-center gap-1 hover:underline">
+                            <Trash2 className="w-3 h-3"/> Resetar para Padrão
+                        </button>
+                        <div className="ml-auto">
+                            {dbTestStatus === 'success' && <span className="text-xs text-green-600 font-bold flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Conectado</span>}
+                            {dbTestStatus === 'error' && <span className="text-xs text-red-600 font-bold flex items-center gap-1"><AlertCircle className="w-3 h-3"/> Falha</span>}
+                        </div>
+                    </div>
+
+                    {/* SQL Helper Section */}
+                    <div className="mt-6 pt-6 border-t">
+                        <button 
+                            onClick={() => setShowSql(!showSql)} 
+                            className="w-full flex items-center justify-between p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+                        >
+                            <span className="text-sm font-bold text-slate-700 flex items-center gap-2"><Terminal className="w-4 h-4"/> Configuração de Tabelas (SQL)</span>
+                            {showSql ? <X className="w-4 h-4"/> : <Plus className="w-4 h-4"/>}
+                        </button>
+                        
+                        {showSql && (
+                            <div className="mt-4 animate-in fade-in slide-in-from-top-2">
+                                <div className="bg-slate-900 rounded-lg p-4 relative">
+                                    <button onClick={copySql} className="absolute top-2 right-2 p-2 bg-white/10 hover:bg-white/20 text-white rounded" title="Copiar SQL">
+                                        <Copy className="w-4 h-4"/>
+                                    </button>
+                                    <pre className="text-[11px] text-green-400 font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed">
+                                        {SQL_SCRIPT}
+                                    </pre>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-2">
+                                    💡 Copie este script, vá no <strong>SQL Editor</strong> do seu Supabase e clique em <strong>Run</strong>.
+                                    Não esqueça de criar o Bucket <strong>'images'</strong> no menu Storage!
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* AI Config */}
+            <div className="bg-white p-6 border rounded-xl shadow-sm">
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><BrainCircuit className="text-indigo-600"/> Reconhecimento Facial (IA)</h3>
+                <div className="space-y-4">
+                    <label className="text-xs font-bold text-slate-600 mb-1 block">PROVEDOR DE IA</label>
                     <select className="w-full border p-2 rounded" value={aiProvider} onChange={e => setAiProvider(e.target.value as AIProvider)}>
-                        <option value="browser">Processamento Local (Navegador)</option>
-                        <option value="compre-face">Servidor Remoto (CompreFace)</option>
+                        <option value="browser">Navegador (Grátis, Processa no PC do Cliente)</option>
+                        <option value="compre-face">CompreFace (Profissional, Requer VPS/Docker)</option>
                     </select>
+                    
                     {aiProvider === 'compre-face' && (
-                        <>
-                            <input className="w-full border p-2 rounded" value={aiApiUrl} onChange={e => setAiApiUrl(e.target.value)} placeholder="URL da API (ex: http://ip:8000)" />
-                            <input className="w-full border p-2 rounded" type="password" value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} placeholder="API Key do Verification Service" />
-                            <button onClick={testAIConnection} className="text-xs font-bold text-indigo-600 underline">Testar Conexão IA</button>
-                        </>
+                        <div className="space-y-4 animate-in fade-in">
+                            <input className="w-full border p-2 rounded text-sm" value={aiApiUrl} onChange={e => setAiApiUrl(e.target.value)} placeholder="URL do Servidor (ex: http://62.72.x.x:8000)" />
+                            <input className="w-full border p-2 rounded text-sm" type="password" value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} placeholder="API Key (Verification Service)" />
+                            <button onClick={testAIConnection} className="text-xs font-bold text-indigo-600 underline">Testar Motor de IA</button>
+                        </div>
                     )}
                 </div>
             </div>
 
-            <div className="bg-white p-6 border rounded-xl shadow-sm">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><Database className="text-indigo-600"/> Banco de Dados (Supabase)</h3>
-                <div className="space-y-4">
-                    <input className="w-full border p-2 rounded" value={dbUrl} onChange={e => setDbUrl(e.target.value)} placeholder="Supabase URL" />
-                    <input className="w-full border p-2 rounded" type="password" value={dbKey} onChange={e => setDbKey(e.target.value)} placeholder="Supabase Anon Key" />
-                    <div className="flex gap-2 text-xs font-bold">
-                        <button onClick={testDBConnection} className="text-indigo-600 underline">Testar Banco</button>
-                        <button onClick={() => { localStorage.removeItem('facefind_db_config'); window.location.reload(); }} className="text-red-600 underline">Resetar p/ Padrão</button>
-                    </div>
-                </div>
+            <div className="flex justify-end sticky bottom-4 z-10">
+                <Button onClick={saveSettings} isLoading={loading} className="px-10 shadow-xl ring-4 ring-white"><Save className="w-4 h-4"/> Salvar Toda Infraestrutura</Button>
             </div>
-            <div className="flex justify-end"><Button onClick={saveSettings} isLoading={loading} className="px-10"><Save className="w-4 h-4"/> Salvar Infraestrutura</Button></div>
         </div>
       )}
     </Layout>
