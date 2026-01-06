@@ -20,7 +20,7 @@ if (localConfig) {
 const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL;
 const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
 
-// 3. Fallback Hardcoded (Segurança de último caso)
+// 3. Fallback Hardcoded (Segurança de último caso - nuvem padrão)
 const FALLBACK_URL = 'https://yzuahgbgzfdzvigesbtl.supabase.co';
 const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl6dWFoZ2JnemZkenZpZ2VzYnRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQxMTU2NTAsImV4cCI6MjA3OTY5MTY1MH0.thj8G3HX39eRHifqH8mGZ6IAerzm4qJ2_OcL8uW3iSU';
 
@@ -28,27 +28,23 @@ const FALLBACK_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 let finalUrl = customUrl || envUrl || FALLBACK_URL;
 let finalKey = customKey || envKey || FALLBACK_KEY;
 
-// Normalização da URL para evitar erros de fetch se o usuário esquecer o protocolo
-if (finalUrl && !finalUrl.startsWith('http')) {
-  finalUrl = `https://${finalUrl}`;
+// Normalização inteligente da URL
+if (finalUrl) {
+    // Se for um IP ou localhost sem protocolo, adiciona http (comum em VPS local)
+    if (!finalUrl.startsWith('http')) {
+        const isLocal = finalUrl.includes('localhost') || finalUrl.includes('127.0.0.1') || /^\d+\.\d+\.\d+\.\d+/.test(finalUrl);
+        finalUrl = isLocal ? `http://${finalUrl}` : `https://${finalUrl}`;
+    }
+    // Remove barra final
+    finalUrl = finalUrl.replace(/\/$/, '');
 }
 
-// Garante que a URL não termine com barra, o que pode quebrar algumas chamadas internas do SDK
-finalUrl = finalUrl?.replace(/\/$/, '');
-
-if (!finalUrl || !finalKey) {
-  console.warn('CRITICAL: Supabase URL or Key is missing. The app may not function correctly.');
-}
-
-// Inicialização segura
-export const supabase = createClient(finalUrl, finalKey);
-
-// Helper para saber se estamos usando config customizada
-export const isUsingCustomConfig = !!customUrl;
-
-// Helper para pegar a config atual (útil para debug no console)
-export const getCurrentConfig = () => ({
-  url: finalUrl,
-  key: finalKey,
-  source: customUrl ? 'local_storage' : (envUrl ? 'env_vars' : 'fallback')
+// Inicialização segura com suporte a instâncias Self-Hosted (pode requerer configurações adicionais de CORS no servidor)
+export const supabase = createClient(finalUrl, finalKey, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+    }
 });
+
+export const isUsingCustomConfig = !!customUrl;

@@ -1,5 +1,5 @@
 
-import React, { ReactNode, ErrorInfo, Component } from 'react';
+import React, { Component, ReactNode, ErrorInfo } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
 import Admin from './pages/Admin';
@@ -14,7 +14,7 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// Fix: Explicitly extend Component with generic types and use a constructor to ensure 'props' and 'state' are correctly typed and identified by TypeScript.
+/* Fix: Explicitly extending Component from React and ensuring 'props' and 'state' are correctly accessed */
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
@@ -33,7 +33,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   render() {
-    // Destructure hasError and error from state, and children from props using 'this' context.
+    /* Fix: Accessed state and props from 'this' context */
     const { hasError, error } = this.state;
     const { children } = this.props;
 
