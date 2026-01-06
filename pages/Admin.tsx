@@ -1,6 +1,6 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Trash2, Upload, Plus, X, Calendar, Lock, Image as ImageIcon, CheckCircle, User, Key, LogIn, Users, Settings, Database, Download, LogOut, Save, BrainCircuit, Server, Activity, AlertCircle, RefreshCw } from 'lucide-react';
+import { Trash2, Upload, Plus, X, Calendar, Lock, Image as ImageIcon, CheckCircle, User, Key, LogIn, Users, Settings, Database, Download, LogOut, Save, BrainCircuit, Server, Activity, AlertCircle, RefreshCw, UserPlus } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 import { createEvent, deleteEvent, getEvents, addPhotos, loginUser, getUsers, createUser, deleteUser, getGlobalSetting, saveGlobalSetting } from '../services/db';
 import { supabase } from '../services/supabase';
@@ -45,13 +45,19 @@ const Admin: React.FC = () => {
   const [usersList, setUsersList] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Form States
+  // Form States Eventos
   const [eventName, setEventName] = useState('');
   const [eventDate, setEventDate] = useState('');
   const [eventPassword, setEventPassword] = useState('');
   const [coverImage, setCoverImage] = useState<string | null>(null);
   const [eventPhotos, setEventPhotos] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState<string>('');
+
+  // Form States Usuários
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
 
   // AI Settings
   const [aiProvider, setAiProvider] = useState<AIProvider>('browser');
@@ -74,29 +80,23 @@ const Admin: React.FC = () => {
       setCurrentUser(user);
     }
     
-    // Load Saved AI Config
-    const loadAIConfig = async () => {
-        const saved = await getGlobalSetting('facefind_ai_config');
-        if (saved) {
-            const parsed = JSON.parse(saved);
+    const loadConfig = async () => {
+        const savedAI = await getGlobalSetting('facefind_ai_config');
+        if (savedAI) {
+            const parsed = JSON.parse(savedAI);
             setAiProvider(parsed.provider);
             setAiApiUrl(parsed.apiUrl || '');
             setAiApiKey(parsed.apiKey || '');
         }
-    };
 
-    // Load DB Config from LocalStorage
-    const loadDBConfig = () => {
-      const local = localStorage.getItem('facefind_db_config');
-      if (local) {
-        const parsed = JSON.parse(local);
-        setDbUrl(parsed.url || '');
-        setDbKey(parsed.key || '');
-      }
+        const localDB = localStorage.getItem('facefind_db_config');
+        if (localDB) {
+          const parsed = JSON.parse(localDB);
+          setDbUrl(parsed.url || '');
+          setDbKey(parsed.key || '');
+        }
     };
-
-    loadAIConfig();
-    loadDBConfig();
+    loadConfig();
   }, []);
 
   useEffect(() => {
@@ -110,7 +110,8 @@ const Admin: React.FC = () => {
         const data = await getEvents();
         setEvents(currentUser?.role === 'master' ? (data || []) : (data || []).filter(e => e.createdBy === currentUser?.id));
       } else if (activeTab === 'users' && currentUser?.role === 'master') {
-        setUsersList(await getUsers());
+        const data = await getUsers();
+        setUsersList(data || []);
       }
     } catch (err: any) { 
         console.error("Admin refresh error:", err?.message || err); 
@@ -123,7 +124,6 @@ const Admin: React.FC = () => {
     setLoginLoading(true);
     setLoginError(false);
     try {
-      // Credenciais Master Padrão
       if (loginUserField === 'admin' && loginPassField === '123') {
         finishLogin({ id: 'master', name: 'Admin Master', role: 'master' });
         return;
@@ -132,7 +132,6 @@ const Admin: React.FC = () => {
       if (dbUser) finishLogin({ id: dbUser.id, name: dbUser.name, role: 'user' });
       else setLoginError(true);
     } catch (err: any) { 
-        console.error("Login error:", err?.message || err);
         setLoginError(true); 
     }
     finally { setLoginLoading(false); }
@@ -144,11 +143,43 @@ const Admin: React.FC = () => {
     sessionStorage.setItem('facefind_auth', JSON.stringify(user));
   };
 
-  const testAIConnection = async () => {
-    if (!aiApiUrl || !aiApiKey) {
-        alert("Preencha a URL e a API Key antes de testar.");
-        return;
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newUserName || !newUserUsername || !newUserPassword) return;
+    setLoading(true);
+    try {
+      await createUser({
+        id: uuidv4(),
+        name: newUserName,
+        username: newUserUsername,
+        password: newUserPassword
+      });
+      setNewUserName('');
+      setNewUserUsername('');
+      setNewUserPassword('');
+      setIsCreatingUser(false);
+      refreshData();
+      alert('Usuário criado com sucesso!');
+    } catch (e: any) {
+      alert("Erro ao criar usuário: " + e.message);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  const handleDeleteUser = async (id: string) => {
+    if (confirm('Tem certeza que deseja excluir este fotógrafo? Todos os eventos dele permanecerão, mas ele perderá o acesso.')) {
+      try {
+        await deleteUser(id);
+        refreshData();
+      } catch (e: any) {
+        alert("Erro ao excluir: " + e.message);
+      }
+    }
+  };
+
+  const testAIConnection = async () => {
+    if (!aiApiUrl || !aiApiKey) return alert("Preencha URL e Key.");
     setTestStatus('testing');
     try {
         const cleanUrl = aiApiUrl.replace(/\/$/, "");
@@ -159,49 +190,27 @@ const Admin: React.FC = () => {
         });
         if (response.status === 400 || response.ok) setTestStatus('success');
         else setTestStatus('error');
-    } catch (e) {
-        setTestStatus('error');
-    }
+    } catch (e) { setTestStatus('error'); }
   };
 
   const testDBConnection = async () => {
     setDbTestStatus('testing');
     try {
-      // Tenta uma consulta simples para validar a conexão
       const { error } = await supabase.from('events').select('count', { count: 'exact', head: true });
       if (error) throw error;
       setDbTestStatus('success');
-    } catch (e) {
-      console.error(e);
-      setDbTestStatus('error');
-    }
+    } catch (e) { setDbTestStatus('error'); }
   };
 
   const saveSettings = async () => {
     setLoading(true);
     try {
-        // Save AI
-        const aiConfig = { provider: aiProvider, apiUrl: aiApiUrl, apiKey: aiApiKey };
-        await saveGlobalSetting('facefind_ai_config', JSON.stringify(aiConfig));
-        
-        // Save DB to LocalStorage
-        const dbConfig = { url: dbUrl, key: dbKey };
-        localStorage.setItem('facefind_db_config', JSON.stringify(dbConfig));
-        
-        alert("Todas as configurações salvas! A página será recarregada para aplicar as mudanças de banco.");
+        await saveGlobalSetting('facefind_ai_config', JSON.stringify({ provider: aiProvider, apiUrl: aiApiUrl, apiKey: aiApiKey }));
+        localStorage.setItem('facefind_db_config', JSON.stringify({ url: dbUrl, key: dbKey }));
+        alert("Configurações salvas!");
         window.location.reload();
-    } catch (e: any) {
-        alert("Erro ao salvar: " + (e?.message || "Erro desconhecido"));
-    } finally {
-        setLoading(false);
-    }
-  };
-
-  const resetDB = () => {
-    if (confirm("Resetar para as configurações de banco padrão do sistema?")) {
-      localStorage.removeItem('facefind_db_config');
-      window.location.reload();
-    }
+    } catch (e: any) { alert("Erro ao salvar: " + e.message); }
+    finally { setLoading(false); }
   };
 
   const handleCreateEvent = async (e: React.FormEvent) => {
@@ -221,9 +230,7 @@ const Admin: React.FC = () => {
       setIsCreatingEvent(false);
       refreshData();
       alert('Evento criado com sucesso!');
-    } catch (err: any) { 
-        alert('Erro ao criar evento: ' + (err?.message || "Erro desconhecido")); 
-    }
+    } catch (err: any) { alert('Erro: ' + err.message); }
     finally { setLoading(false); setUploadProgress(''); }
   };
 
@@ -234,7 +241,7 @@ const Admin: React.FC = () => {
         <form onSubmit={handleLogin} className="space-y-4">
           <input className="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Usuário" value={loginUserField} onChange={e => setLoginUserField(e.target.value)} />
           <input className="w-full border p-2 rounded focus:ring-2 focus:ring-indigo-500 outline-none" type="password" placeholder="Senha" value={loginPassField} onChange={e => setLoginPassField(e.target.value)} />
-          {loginError && <p className="text-red-500 text-sm">Credenciais inválidas. Tente admin / 123</p>}
+          {loginError && <p className="text-red-500 text-sm">Credenciais inválidas.</p>}
           <Button type="submit" className="w-full" isLoading={loginLoading}>Entrar</Button>
         </form>
       </div>
@@ -246,7 +253,7 @@ const Admin: React.FC = () => {
       <div className="flex justify-between items-center mb-8">
         <div>
             <h1 className="text-2xl font-bold text-slate-900">Olá, {currentUser?.name}</h1>
-            <p className="text-slate-500 text-sm">Gerencie seus eventos e infraestrutura.</p>
+            <p className="text-slate-500 text-sm">{currentUser?.role === 'master' ? 'Administrador do Sistema' : 'Painel do Fotógrafo'}</p>
         </div>
         <Button variant="secondary" onClick={() => { sessionStorage.removeItem('facefind_auth'); window.location.reload(); }}>
             <LogOut className="w-4 h-4"/> Sair
@@ -255,14 +262,14 @@ const Admin: React.FC = () => {
 
       <div className="flex border-b mb-6 overflow-x-auto no-scrollbar">
         <button onClick={() => setActiveTab('events')} className={`px-4 py-3 whitespace-nowrap font-medium transition-all ${activeTab === 'events' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Eventos</button>
-        {currentUser?.role === 'master' && <button onClick={() => setActiveTab('users')} className={`px-4 py-3 whitespace-nowrap font-medium transition-all ${activeTab === 'users' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Usuários</button>}
-        {currentUser?.role === 'master' && <button onClick={() => setActiveTab('settings')} className={`px-4 py-3 whitespace-nowrap font-medium transition-all ${activeTab === 'settings' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Configurações Técnicas</button>}
+        {currentUser?.role === 'master' && <button onClick={() => setActiveTab('users')} className={`px-4 py-3 whitespace-nowrap font-medium transition-all ${activeTab === 'users' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Fotógrafos</button>}
+        {currentUser?.role === 'master' && <button onClick={() => setActiveTab('settings')} className={`px-4 py-3 whitespace-nowrap font-medium transition-all ${activeTab === 'settings' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}>Infraestrutura</button>}
       </div>
 
       {activeTab === 'events' && (
         <>
             <div className="flex justify-end mb-4">
-                {!isCreatingEvent && <Button onClick={() => setIsCreatingEvent(true)}><Plus className="w-4 h-4"/> Novo Evento</Button>}
+                {!isCreatingEvent && <Button onClick={() => setIsCreatingEvent(true)}><Plus className="w-4 h-4"/> Criar Novo Evento</Button>}
             </div>
             {isCreatingEvent ? (
                 <form onSubmit={handleCreateEvent} className="bg-white p-6 border rounded-xl space-y-4 mb-6 shadow-sm">
@@ -270,27 +277,13 @@ const Admin: React.FC = () => {
                         <input className="border p-2 rounded" placeholder="Nome do Evento" value={eventName} onChange={e => setEventName(e.target.value)} required />
                         <input className="border p-2 rounded" type="date" value={eventDate} onChange={e => setEventDate(e.target.value)} required />
                     </div>
-                    <input className="w-full border p-2 rounded" type="password" placeholder="Senha da Galeria (opcional)" value={eventPassword} onChange={e => setEventPassword(e.target.value)} />
-                    
+                    <input className="w-full border p-2 rounded" type="password" placeholder="Senha Opcional" value={eventPassword} onChange={e => setEventPassword(e.target.value)} />
                     <div className="border-2 border-dashed p-4 text-center cursor-pointer rounded-lg hover:bg-slate-50 transition-colors" onClick={() => fileInputRef.current?.click()}>
-                        {coverImage ? <img src={coverImage} className="h-32 mx-auto rounded shadow-sm"/> : (
-                            <div className="text-slate-400 py-4">
-                                <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-20"/>
-                                <p>Clique para selecionar a Capa</p>
-                            </div>
-                        )}
+                        {coverImage ? <img src={coverImage} className="h-32 mx-auto rounded shadow-sm"/> : <div className="text-slate-400 py-4"><ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-20"/><p>Clique para capa</p></div>}
                         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={async e => e.target.files && setCoverImage(await processImage(e.target.files[0]))} />
                     </div>
-
-                    <div className="space-y-2">
-                        <label className="block text-sm font-medium text-slate-700">Fotos do Evento</label>
-                        <input type="file" multiple accept="image/*" className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100" onChange={e => e.target.files && setEventPhotos(Array.from(e.target.files))} />
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-4">
-                        <Button variant="secondary" onClick={() => setIsCreatingEvent(false)}>Cancelar</Button>
-                        <Button type="submit" isLoading={loading}>{uploadProgress || "Criar Evento"}</Button>
-                    </div>
+                    <input type="file" multiple accept="image/*" className="w-full text-sm text-slate-500" onChange={e => e.target.files && setEventPhotos(Array.from(e.target.files))} />
+                    <div className="flex justify-end gap-3 pt-4"><Button variant="secondary" onClick={() => setIsCreatingEvent(false)}>Cancelar</Button><Button type="submit" isLoading={loading}>{uploadProgress || "Publicar Evento"}</Button></div>
                 </form>
             ) : (
                 <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
@@ -304,9 +297,7 @@ const Admin: React.FC = () => {
                                     <td className="p-4 font-bold text-slate-900">{ev.name}</td>
                                     <td className="p-4 text-slate-500 text-sm">{new Date(ev.date + 'T00:00:00').toLocaleDateString()}</td>
                                     <td className="p-4 text-right">
-                                        <button onClick={async () => { if(confirm('Excluir evento?')) { await deleteEvent(ev.id); refreshData(); }}} className="text-slate-400 hover:text-red-500 p-2">
-                                            <Trash2 className="w-4 h-4"/>
-                                        </button>
+                                        <button onClick={async () => { if(confirm('Excluir evento?')) { await deleteEvent(ev.id); refreshData(); }}} className="text-slate-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
                                     </td>
                                 </tr>
                             ))}
@@ -317,64 +308,80 @@ const Admin: React.FC = () => {
         </>
       )}
 
-      {activeTab === 'settings' && (
-        <div className="max-w-xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4">
-            
-            {/* AI Config */}
-            <div className="bg-white p-6 border rounded-xl shadow-sm">
-                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><BrainCircuit className="text-indigo-600"/> Motor de Reconhecimento</h3>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Provedor</label>
-                        <select className="w-full border p-2 rounded" value={aiProvider} onChange={e => setAiProvider(e.target.value as AIProvider)}>
-                            <option value="browser">Navegador (Lento, Grátis)</option>
-                            <option value="compre-face">Exadel CompreFace (Rápido, Profissional)</option>
-                        </select>
+      {activeTab === 'users' && currentUser?.role === 'master' && (
+        <div className="space-y-6">
+            <div className="flex justify-end">
+                {!isCreatingUser && <Button onClick={() => setIsCreatingUser(true)}><UserPlus className="w-4 h-4"/> Adicionar Fotógrafo</Button>}
+            </div>
+
+            {isCreatingUser && (
+                <form onSubmit={handleCreateUser} className="bg-white p-6 border rounded-xl space-y-4 mb-6 shadow-sm">
+                    <h3 className="font-bold">Novo Cadastro de Fotógrafo</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <input className="border p-2 rounded" placeholder="Nome Completo" value={newUserName} onChange={e => setNewUserName(e.target.value)} required />
+                        <input className="border p-2 rounded" placeholder="Usuário (login)" value={newUserUsername} onChange={e => setNewUserUsername(e.target.value)} required />
+                        <input className="border p-2 rounded" type="password" placeholder="Senha" value={newUserPassword} onChange={e => setNewUserPassword(e.target.value)} required />
                     </div>
+                    <div className="flex justify-end gap-3 pt-2">
+                        <Button variant="secondary" onClick={() => setIsCreatingUser(false)}>Cancelar</Button>
+                        <Button type="submit" isLoading={loading}>Cadastrar Fotógrafo</Button>
+                    </div>
+                </form>
+            )}
+
+            <div className="bg-white border rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-left">
+                    <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+                        <tr><th className="p-4 font-semibold">Nome</th><th className="p-4 font-semibold">Usuário</th><th className="p-4 font-semibold text-right">Ações</th></tr>
+                    </thead>
+                    <tbody className="divide-y">
+                        {usersList.map(u => (
+                            <tr key={u.id} className="hover:bg-slate-50">
+                                <td className="p-4 text-slate-900 font-medium">{u.name}</td>
+                                <td className="p-4 text-slate-500">{u.username}</td>
+                                <td className="p-4 text-right">
+                                    <button onClick={() => handleDeleteUser(u.id)} className="text-slate-400 hover:text-red-500 p-2"><Trash2 className="w-4 h-4"/></button>
+                                </td>
+                            </tr>
+                        ))}
+                        {usersList.length === 0 && <tr><td colSpan={3} className="p-8 text-center text-slate-400">Nenhum fotógrafo cadastrado.</td></tr>}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+      )}
+
+      {activeTab === 'settings' && currentUser?.role === 'master' && (
+        <div className="max-w-xl mx-auto space-y-8">
+            <div className="bg-white p-6 border rounded-xl shadow-sm">
+                <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><BrainCircuit className="text-indigo-600"/> IA de Reconhecimento</h3>
+                <div className="space-y-4">
+                    <select className="w-full border p-2 rounded" value={aiProvider} onChange={e => setAiProvider(e.target.value as AIProvider)}>
+                        <option value="browser">Processamento Local (Navegador)</option>
+                        <option value="compre-face">Servidor Remoto (CompreFace)</option>
+                    </select>
                     {aiProvider === 'compre-face' && (
                         <>
-                            <input className="w-full border p-2 rounded" value={aiApiUrl} onChange={e => setAiApiUrl(e.target.value)} placeholder="URL do CompreFace (ex: http://62.72.11.108:8000)" />
+                            <input className="w-full border p-2 rounded" value={aiApiUrl} onChange={e => setAiApiUrl(e.target.value)} placeholder="URL da API (ex: http://ip:8000)" />
                             <input className="w-full border p-2 rounded" type="password" value={aiApiKey} onChange={e => setAiApiKey(e.target.value)} placeholder="API Key do Verification Service" />
-                            <div className="flex items-center justify-between p-2 bg-slate-50 rounded border text-xs">
-                                <span className="flex items-center gap-2">
-                                    {testStatus === 'success' ? <CheckCircle className="text-green-500 w-4 h-4"/> : <Activity className="w-4 h-4"/>}
-                                    Status: {testStatus}
-                                </span>
-                                <button onClick={testAIConnection} className="text-indigo-600 font-bold">Testar IA</button>
-                            </div>
+                            <button onClick={testAIConnection} className="text-xs font-bold text-indigo-600 underline">Testar Conexão IA</button>
                         </>
                     )}
                 </div>
             </div>
 
-            {/* DB Config */}
             <div className="bg-white p-6 border rounded-xl shadow-sm">
                 <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-slate-900"><Database className="text-indigo-600"/> Banco de Dados (Supabase)</h3>
                 <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Supabase URL</label>
-                        <input className="w-full border p-2 rounded" value={dbUrl} onChange={e => setDbUrl(e.target.value)} placeholder="https://xyz.supabase.co" />
+                    <input className="w-full border p-2 rounded" value={dbUrl} onChange={e => setDbUrl(e.target.value)} placeholder="Supabase URL" />
+                    <input className="w-full border p-2 rounded" type="password" value={dbKey} onChange={e => setDbKey(e.target.value)} placeholder="Supabase Anon Key" />
+                    <div className="flex gap-2 text-xs font-bold">
+                        <button onClick={testDBConnection} className="text-indigo-600 underline">Testar Banco</button>
+                        <button onClick={() => { localStorage.removeItem('facefind_db_config'); window.location.reload(); }} className="text-red-600 underline">Resetar p/ Padrão</button>
                     </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1">Supabase Anon Key</label>
-                        <input className="w-full border p-2 rounded" type="password" value={dbKey} onChange={e => setDbKey(e.target.value)} placeholder="Sua chave pública anon" />
-                    </div>
-                    
-                    <div className="flex gap-2">
-                        <div className="flex-1 flex items-center gap-2 p-2 bg-slate-50 rounded border text-xs">
-                            {dbTestStatus === 'success' ? <CheckCircle className="text-green-500 w-4 h-4"/> : <RefreshCw className={`w-4 h-4 ${dbTestStatus === 'testing' ? 'animate-spin' : ''}`}/>}
-                            Conexão: {dbTestStatus}
-                        </div>
-                        <button onClick={testDBConnection} className="px-3 py-1 bg-slate-100 rounded text-xs font-bold hover:bg-slate-200">Testar Banco</button>
-                        <button onClick={resetDB} className="px-3 py-1 bg-red-50 text-red-600 rounded text-xs font-bold hover:bg-red-100">Resetar p/ Padrão</button>
-                    </div>
-                    <p className="text-[10px] text-slate-400">Nota: Ao alterar o banco, você precisa recarregar a página para que as fotos e eventos do novo banco apareçam.</p>
                 </div>
             </div>
-            
-            <div className="flex justify-end">
-                <Button onClick={saveSettings} isLoading={loading} className="px-10"><Save className="w-4 h-4"/> Salvar Tudo</Button>
-            </div>
+            <div className="flex justify-end"><Button onClick={saveSettings} isLoading={loading} className="px-10"><Save className="w-4 h-4"/> Salvar Infraestrutura</Button></div>
         </div>
       )}
     </Layout>

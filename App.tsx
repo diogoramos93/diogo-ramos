@@ -1,4 +1,5 @@
-import React, { Component, ReactNode, ErrorInfo } from 'react';
+
+import React, { ReactNode, ErrorInfo } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
 import Admin from './pages/Admin';
@@ -13,9 +14,9 @@ interface ErrorBoundaryState {
   error: Error | null;
 }
 
-// Fix: Explicitly use Component from react to ensure TypeScript correctly identifies state and props
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // Fix: Use class property for state initialization instead of constructor to resolve "Property 'state' does not exist" errors
+// Fix: Explicitly use React.Component to ensure TypeScript correctly identifies base class properties
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  // Use class property for state initialization
   state: ErrorBoundaryState = {
     hasError: false,
     error: null
@@ -30,7 +31,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   render() {
-    // Fix: Access state and props which are now correctly recognized through Component inheritance
+    // Fix: Access state and props using this context which is required in class components
     const { hasError, error } = this.state;
     const { children } = this.props;
 
